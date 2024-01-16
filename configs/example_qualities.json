@@ -1,0 +1,15 @@
+{
+    "sheets": {
+        "self": {
+            "sheet_id": "this should be the sheet ID",
+            "rename": {
+                "Comments": "Examples, so I can understand"
+            }
+        },
+        "Viktor": {
+            "sheet_id": "some other sheet ID"
+        }
+    },
+    "scope": ["https://spreadsheets.google.com/feeds"],
+    "credentials": "from the downloaded JSON when one has created the service account"
+}
