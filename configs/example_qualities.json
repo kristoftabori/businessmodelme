@@ -3,7 +3,7 @@
         "self": {
             "sheet_id": "this should be the sheet ID",
             "rename": {
-                "Comments": "Examples, so I can understand"
+                "what should be changed": "what should be changed to"
             }
         },
         "Viktor": {
