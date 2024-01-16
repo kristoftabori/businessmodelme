@@ -96,8 +96,10 @@ class QualitiesDownloader:
         sheet_key = self_dict.get(self.sheet_id_name)
         tab_index = self_dict.get(self.tab_index_name)
         column_renaming = self_dict.get(self.rename_name)
-        
-        return self.download_sheet(sheet_key=sheet_key, tab_index=tab_index).rename(columns=column_renaming)
+        tobereturned = self.download_sheet(sheet_key=sheet_key, tab_index=tab_index)
+        if column_renaming is not None:
+            return tobereturned.rename(columns=column_renaming)
+        return tobereturned
     
     def refresh_self_dataframe(self):
         self._self_dataframe = self.download_self()
