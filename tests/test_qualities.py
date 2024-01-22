@@ -4,7 +4,9 @@ import pandas as pd
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from unittest.mock import Mock, patch
-from ..source.qualities import GoogleSheetsClient, QualitiesDownloader
+from ..source.qualities_downloader import QualitiesDownloader
+from ..source.qualities_summary import FeedbackSummary
+from ..source.google_sheets_client import GoogleSheetsClient
 
 
 class TestGoogleSheetsClient:
@@ -198,6 +200,165 @@ class TestQualitiesDownloader:
         assert isinstance(df, pd.DataFrame)
         assert not df.empty
         assert len(df) == 2  # Assuming one row per sheet
+
+        
+class TestFeedbackSummary:
+
+    def setup_method(self, method):
+        self.my_df = pd.DataFrame([
+            {
+                "Quality": "Abstract thinker",
+                "Comment": "I like abstract base classes",
+            },
+            {
+                "Quality": "Analytical",
+                "Comment": "I like to analyse code",
+            },
+            {
+                "Quality": "Spontaneous",
+                "Comment": "I like to jump on exciting projects",
+            },
+            {
+                "Quality": "Committed",
+                "Comment": "if I commit myself to a project, I will push forward until it's done",
+            },
+            {
+                "Quality": "Independent",
+                "Comment": "",
+            },
+            {
+                "Quality": "Ambitious",
+                "Comment": "",
+            },
+        ])
+        self.others_df = pd.DataFrame([
+            {
+                "Quality": "Abstract thinker",
+                "Examples, so I can understand": "you like to perform induction and deduction",
+                "Name": "A"
+            },
+            {
+                "Quality": "Abstract thinker",
+                "Examples, so I can understand": "you often speak in abstract terms",
+                "Name": "B"
+            },
+            {
+                "Quality": "Analytical",
+                "Examples, so I can understand": "you break down problems to smaller pieces very well and often",
+                "Name": "A"
+            },
+            {
+                "Quality": "Ambitious",
+                "Examples, so I can understand": "you always want to build the best tool",
+                "Name": "B"
+            },
+            {
+                "Quality": "Committed",
+                "Examples, so I can understand": "I've never seen you drop off a project",
+                "Name": "B"
+            },
+            {
+                "Quality": "Independent",
+                "Examples, so I can understand": "you don't require others to start something",
+                "Name": "A"
+            },
+            {
+                "Quality": "Independent",
+                "Examples, so I can understand": "you kicked out the other project on your own and it was a blast",
+                "Name": "B"
+            },
+        ])
+        self.hierarchy = hierarchy = ["Quality", "Others Count",  "My Examples","Name", "Their Examples"]
+        
+    def test_init(self):
+        my_summary = FeedbackSummary(self.my_df, self.others_df, self.hierarchy)
+        assert my_summary.self_dataframe is not None
+        assert my_summary.others_dataframe is not None
+        assert my_summary.hierarchy is not None
+
+    def test_check_qualities(self):
+        extra_line = [{
+            "Quality": "Independent",
+            "Comment": "",
+        }]
+        two_extra_lines = [
+            {
+                "Quality": "Independent",
+                "Comment": "",
+            },
+            {
+                "Quality": "Committed",
+                "Comment": "if I commit myself to a project, I will psuh forward until ti's done",
+            },
+        ]
+        with pytest.raises(ValueError) as e:
+            my_other_summary = FeedbackSummary(pd.concat([self.my_df, pd.DataFrame(extra_line)]), self.others_df, self.hierarchy)
+        
+        assert "There is a duplicated entry found" in str(e.value)
+        with pytest.raises(ValueError) as e:
+            my_other_summary = FeedbackSummary(pd.concat([self.my_df, pd.DataFrame(two_extra_lines)]), self.others_df, self.hierarchy)
+        
+        assert "There are duplicated entries found" in str(e.value)
+        with pytest.raises(ValueError) as e:
+            my_other_summary = FeedbackSummary(self.my_df.iloc[:-1], self.others_df, self.hierarchy)
+        
+        assert "There is a quality missing from" in str(e.value)
+        with pytest.raises(ValueError) as e:
+            my_other_summary = FeedbackSummary(self.my_df.iloc[1:-1], self.others_df, self.hierarchy)
+        
+        assert "There are qualities missing from" in str(e.value)
+
+    def test_count_dataframe_creation(self):
+        my_summary = FeedbackSummary(self.my_df, self.others_df, self.hierarchy)
+        assert my_summary._count_dataframe is None
+        assert isinstance(my_summary.count_dataframe, pd.DataFrame)
+        assert "Others Count" in my_summary.count_dataframe.columns
+        assert my_summary.count_dataframe.loc[my_summary.count_dataframe["Quality"] == "Abstract thinker", "Others Count"].reset_index(drop=True)[0] == 2
+        assert my_summary.count_dataframe.loc[my_summary.count_dataframe["Quality"] == "Analytical", "Others Count"].reset_index(drop=True)[0] == 1
+
+    def test_merged_dataframe_creation(self):
+        my_summary = FeedbackSummary(self.my_df, self.others_df, self.hierarchy)
+        assert my_summary._merged_dataframe is None
+        assert isinstance(my_summary.merged_dataframe, pd.DataFrame)
+        assert not any(my_summary.merged_dataframe.isna().any())
+        assert my_summary.merged_dataframe["Others Count"].is_monotonic_decreasing
+        assert my_summary.merged_dataframe.loc[my_summary.merged_dataframe["Others Count"] == 2, "Quality"].is_monotonic_increasing
+        assert my_summary.merged_dataframe.loc[my_summary.merged_dataframe["Others Count"] == 1, "Quality"].is_monotonic_increasing
+        assert my_summary.merged_dataframe.loc[my_summary.merged_dataframe["Others Count"] == 0, "Quality"].is_monotonic_increasing
+        for quality in my_summary.merged_dataframe["Quality"].unique():
+            assert my_summary.merged_dataframe.loc[my_summary.merged_dataframe["Quality"] == quality, "Name"].is_monotonic_increasing
+
+    def test_match_df(self):
+        my_summary = FeedbackSummary(self.my_df, self.others_df, self.hierarchy)
+        match_df = my_summary.match_dataframe()
+        assert "Abstract thinker" in list(match_df["Quality"])
+        for quality in list(match_df["Quality"].unique()):
+            count_list = list(match_df.loc[match_df["Quality"] == quality, "Others Count"])
+            assert all([element == len(count_list) for element in count_list])
+
+    def test_only_me_df(self):
+        my_summary = FeedbackSummary(self.my_df, self.others_df, self.hierarchy)
+        only_me_df = my_summary.only_me_dataframe()
+        assert "Spontaneous" in list(only_me_df["Quality"])
+        assert only_me_df.shape[0] == 1
+        assert all([element == 0 for element in list(only_me_df["Others Count"])])
+
+    def test_only_others_df(self):
+        my_summary = FeedbackSummary(self.my_df, self.others_df, self.hierarchy)
+        only_others_df = my_summary.only_others_dataframe()
+        assert "Independent" in list(only_others_df["Quality"])
+        assert "Ambitious" in list(only_others_df["Quality"])
+        assert only_others_df.shape[0] == 3
+        assert all([element > 0 for element in list(only_others_df["Others Count"])])
+        for quality in list(only_others_df["Quality"].unique()):
+            count_list = list(only_others_df.loc[only_others_df["Quality"] == quality, "Others Count"])
+            assert all([element == len(count_list) for element in count_list])
+
+    def test_remove_redundancies(self):
+        my_summary = FeedbackSummary(self.my_df, self.others_df, self.hierarchy)
+        removed_df = my_summary.remove_redundancies(my_summary.match_dataframe())
+        qualities = [quality for quality in list(my_summary.match_dataframe()["Quality"].unique())]
+        assert all([removed_df.loc[removed_df["Quality"] == quality, "Quality"].shape[0] == 1 for quality in qualities])
 
         
 
